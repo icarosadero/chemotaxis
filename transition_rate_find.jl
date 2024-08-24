@@ -114,33 +114,6 @@ end
 
 begin
     # Load the data
-    types = Dict(
-        "sm" => Float64,
-        "sm295" => Float64,
-        "sm302" => Float64,
-        "sm309" => Float64,
-        "sm295&302" => Float64,
-        "sm295&309" => Float64,
-        "sm302&309" => Float64,
-        "sm295&302&309" => Float64
-    )
-    columns = [
-        "sm",
-        "sm295",
-        "sm302",
-        "sm309",
-        "sm295&302",
-        "sm295&309",
-        "sm302&309",
-        "sm295&302&309"
-    ]
-    g_columns = copy(columns)
-    push!(g_columns, "Exp")
-    data = CSV.read("data.csv", DataFrame, delim = "\t", types = types)
-    data = data[:, g_columns]
-    data = combine(groupby(data, :Exp), names(data[:, columns]) .=> mean, renamecols = false)
-    totals = sum(Matrix(data[:,columns]), dims=2)
-    data[:, columns] = data[:, columns] ./ totals
     ix_to_meth = Dict(
         1 => "sm",
         2 => "sm295",
@@ -151,12 +124,18 @@ begin
         7 => "sm302&309",
         8 => "sm295&302&309"
     )
+    types = Dict(s => Float64 for s in values(ix_to_meth))
+    columns = collect(values(ix_to_meth))
+    g_columns = copy(columns)
+    push!(g_columns, "Exp")
+    data = CSV.read("data.csv", DataFrame, delim = "\t", types = types)
+    data = data[:, g_columns]
+    data = combine(groupby(data, :Exp), names(data[:, columns]) .=> mean, renamecols = false)
+    totals = sum(Matrix(data[:,columns]), dims=2)
+    data[:, columns] = data[:, columns] ./ totals
     A_values = data[data.Exp .== "A", columns]
     A_values = Dict(pairs(eachcol(A_values)))
-    A = zeros(length(A_values))
-    for i in 1:length(A_values)
-        A[i] = A_values[Symbol(ix_to_meth[i])][1]
-    end
+    A = [A_values[Symbol(ix_to_meth[i])][1] for i ∈ 1:length(A_values)]
     A
 end
 
@@ -178,22 +157,33 @@ begin
     @info "Found: $k_optim"
 end
 
-begin
+@time begin
     n = length(k_optim)
     M_optim = transition_matrix(k_optim)
-    expM = exp(M_optim)
+    λ, Q = eigen(M_optim) # M = QΛQ^(-1)
+    Λ = Diagonal(λ)
+    expΛ = exp(Λ)
+    iQ = inv(Q)
     B = zeros(2^n)
     B[1] = 1
     t = LinRange(0, 15, 100)
-    P = [((expM)^t_i)*B for t_i in t]
+    P = [Q*((expΛ)^t_i)*iQ*B for t_i in t]
     P = mapreduce(permutedims, vcat, P)
 end
 
 begin
+    m = size(P)[2]
+    labels = permutedims([bitstring(UInt8(i))[end-2:end] for i ∈ 0:m-1])
+    colors = collect(palette(:tab10))[1:m]
     plot(t, P,
-        label = ["000" "001" "010" "011" "100" "101" "110" "111"],
-        xlabel = "Time",
+        label = labels,
+        xlabel = "Time (min)",
         ylabel = "Occupation Probability",
-        legend = :top)
+        legend = :outerright,
+        size = (900, 600),
+        linewidth = 2,
+        palette = colors
+    )
+    scatter!([1], transpose(A), labels = nothing, marker = :x, palette = colors, markersize = 5, markerstrokewidth = 2)
     savefig("transition_rate_find.png")
 end
