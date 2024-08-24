@@ -10,105 +10,22 @@ begin
 end
 
 begin
-    function methylator(state::Vector, variables::Vector)
-        possibilities = []
-        for i in eachindex(state)
-            if state[i] == 0
-                new_state = copy(state)
-                new_state[i] = variables[i]
-                push!(possibilities, new_state)
-            end
-        end
-        return possibilities
-    end
-    function demethylator(state::Vector)
-        possibilities = []
-        for i in eachindex(state)
-            if state[i] != 0
-                new_state = copy(state)
-                new_state[i] = 0
-                push!(possibilities, new_state)
-            end
-        end
-
-        return possibilities
-    end
-    function to_ix(state::Vector)::Int
-        u = BitVector(state .!= 0)
-        return parse(Int, join(Int.(u)), base = 2) + 1
-    end
-    
-    """
-        transition_matrix(variables)
-
-    Compute the transition matrix for a given set of variables.
-
-    # Arguments
-    - `variables`: An array of variables representing the transition rates.
-
-    # Returns
-    - `M`: The transition matrix.
-
-    # Examples
-    ```julia
-    transition_matrix([1,1])
-    ```
-    """
-    function transition_matrix(variables)
-        n = length(variables)
-        M_track = Array{Any}(nothing, 2^n, 2^n)
-        function assign_out!(state, variables)
-            next = methylator(state, variables)
-            if length(next) != 0
-                for s in next
-                    i = to_ix(state)
-                    v = -variables[argmax(s - state)]
-                    if typeof(M_track[i,i]) == Nothing
-                        M_track[i,i] = Set([(state, s, v)])
-                    else
-                        M_track[i,i] = M_track[i,i] ∪ Set([(state, s, v)])
-                    end
-                    if sum(s - state) != 0
-                        assign_out!(s, variables)
-                    end
+    function transition_matrix(kseq, η=0.0)
+        nMet = length(kseq)
+        nStates = 1 << nMet
+        T = zeros(nStates, nStates)
+        for s0 ∈ 0:nStates-1
+            for site ∈ 0:nMet-1
+                m = 1 << site
+                s1 = s0 | m
+                if s1 != s0
+                    k = (site == 0) || (s0 & (1 << (site - 1)))!=0 ? kseq[site + 1] : η*kseq[site + 1]
+                    T[s0+1, s0+1] -= k
+                    T[s1+1, s0+1] += k
                 end
             end
         end
-        function assign_in!(state, variables)
-            next = demethylator(state)
-            if length(next) != 0
-                for s in next
-                    i = to_ix(state)
-                    j = to_ix(s)
-                    v = variables[argmax(state - s)]
-                    if typeof(M_track[i,j]) == Nothing
-                        M_track[i,j] = Set([(state, s, v)])
-                    else
-                        M_track[i,j] = M_track[i,j] ∪ Set([(state, s, v)])
-                    end
-                    if sum(state - s) != 0
-                        assign_in!(s, variables)
-                    end
-                end
-            end
-        end
-        state = zeros(n)
-        assign_out!(state, variables)
-        state = copy(variables)
-        assign_in!(state, variables)
-        
-        #Construct matrix
-        M = zeros(2^n, 2^n)
-        for i in 1:2^n
-            for j in 1:2^n
-                if typeof(M_track[i,j]) == Nothing
-                    M[i,j] = 0
-                else
-                    M[i,j] = sum([x[3] for x in M_track[i,j]])
-                end
-            end
-        end
-        return M
+        return T
     end
 end
 
