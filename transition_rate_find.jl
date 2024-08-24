@@ -10,16 +10,32 @@ begin
 end
 
 begin
-    function transition_matrix(kseq, η=0.0)
+    """
+        transition_matrix(kseq, η=1.0)
+
+    Constructs the transition matrix for a given set of transition rates.
+
+    # Arguments
+    - `kseq`: An array of transition rates for each state.
+    - `η`: A scaling factor for the random transition rates. Default is 1.0.
+
+    # Returns
+    - `T`: The transition matrix.
+    """
+    function transition_matrix(kseq, η=1.0)
         nMet = length(kseq)
         nStates = 1 << nMet
         T = zeros(nStates, nStates)
         for s0 ∈ 0:nStates-1
-            for site ∈ 0:nMet-1
-                m = 1 << site
-                s1 = s0 | m
-                if s1 != s0
-                    k = (site == 0) || (s0 & (1 << (site - 1)))!=0 ? kseq[site + 1] : η*kseq[site + 1]
+            #Union of all accesbile states. For example, for s0 = 0, ~s0 = 7 - 0 = 7 = 111
+            accessible = digits((nStates - 1) - s0, base = 2, pad = nMet)
+            @debug "s0: $s0, accessible: $accessible"
+            for i ∈ 1:nMet
+                site = accessible[i] << (i - 1)
+                if site != 0
+                    s1 = s0 | site
+                    @debug "s0: $s0, s1: $s1, site: $site"
+                    k = (s1 == s0 << 1 + 1) ? kseq[i] : η*kseq[i]
                     T[s0+1, s0+1] -= k
                     T[s1+1, s0+1] += k
                 end
@@ -56,7 +72,7 @@ begin
     A
 end
 
-begin
+@time begin
     k = rand(3)
     @info "Ansatz: $k"
     function objective(variables)
