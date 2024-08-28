@@ -22,8 +22,8 @@ begin
     # Returns
     - `T`: The transition matrix.
     """
-    function transition_matrix(kseq, η=1.0)
-        nMet = length(kseq)
+    function transition_matrix(kseq)
+        nMet = length(kseq)÷2
         nStates = 1 << nMet
         T = zeros(nStates, nStates)
         for s0 ∈ 0:nStates-1
@@ -35,7 +35,7 @@ begin
                 if site != 0
                     s1 = s0 | site
                     @debug "s0: $s0, s1: $s1, site: $site"
-                    k = (s1 == s0 << 1 + 1) ? kseq[i] : η*kseq[i]
+                    k = (s1 == s0 << 1 + 1) ? kseq[i] : kseq[i+nMet]
                     T[s0+1, s0+1] -= k
                     T[s1+1, s0+1] += k
                 end
@@ -48,15 +48,16 @@ end
 begin
     # Load the data
     ix_to_meth = Dict(
-        1 => "sm",
-        2 => "sm295",
-        3  =>"sm302",
-        5 => "sm309",
-        4 => "sm295&302",
-        6 => "sm295&309",
-        7 => "sm302&309",
-        8 => "sm295&302&309"
+        0 => "sm",
+        4 => "sm295",
+        2  =>"sm302",
+        1 => "sm309",
+        6 => "sm295&302",
+        5 => "sm295&309",
+        3 => "sm302&309",
+        7 => "sm295&302&309"
     )
+    
     types = Dict(s => Float64 for s in values(ix_to_meth))
     columns = collect(values(ix_to_meth))
     g_columns = copy(columns)
@@ -68,16 +69,16 @@ begin
     data[:, columns] = data[:, columns] ./ totals
     A_values = data[data.Exp .== "A", columns]
     A_values = Dict(pairs(eachcol(A_values)))
-    A = [A_values[Symbol(ix_to_meth[i])][1] for i ∈ 1:length(A_values)]
+    A = [A_values[Symbol(ix_to_meth[i-1])][1] for i ∈ 1:length(A_values)]
     A
 end
 
 @time begin
-    k = rand(3)
+    k = [1.0,1.0,1.0,0.2,0.2,0.2]
     @info "Ansatz: $k"
     function objective(variables)
-        variables = abs.(variables) #Must be positive
-        n = length(variables)
+        variables = variables.^2 #Must be positive
+        n = length(variables)÷2
         B = zeros(2^n)
         B[1] = 1
         M = transition_matrix(variables)
@@ -86,12 +87,12 @@ end
         return residue
     end
     result = optimize(objective, k)
-    k_optim = abs.(result.minimizer)
+    k_optim = result.minimizer.^2
     @info "Found: $k_optim"
 end
 
 @time begin
-    n = length(k_optim)
+    n = length(k_optim)÷2
     M_optim = transition_matrix(k_optim)
     λ, Q = eigen(M_optim) # M = QΛQ^(-1)
     Λ = Diagonal(λ)
@@ -99,7 +100,7 @@ end
     iQ = inv(Q)
     B = zeros(2^n)
     B[1] = 1
-    t = LinRange(0, 15, 100)
+    t = LinRange(0, 2, 100)
     P = [Q*((expΛ)^t_i)*iQ*B for t_i in t]
     P = mapreduce(permutedims, vcat, P)
 end
