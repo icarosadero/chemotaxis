@@ -11,16 +11,16 @@ end
 
 begin
     """
-        transition_matrix(kseq, η=1.0)
+        transition_matrix(kseq)
 
-    Constructs the transition matrix for a given set of transition rates.
+    Constructs the transition matrix for a given sequence of transition rates.
 
     # Arguments
-    - `kseq`: An array of transition rates for each state.
-    - `η`: A scaling factor for the random transition rates. Default is 1.0.
+    - `kseq`: A sequence of transition rates. The length of `kseq` must be even.
 
     # Returns
     - `T`: The transition matrix.
+
     """
     function transition_matrix(kseq)
         nMet = length(kseq)÷2
@@ -46,78 +46,85 @@ begin
 end
 
 begin
-    # Load the data
-    ix_to_meth = Dict(
-        0 => "sm",
-        4 => "sm295",
-        2  =>"sm302",
-        1 => "sm309",
-        6 => "sm295&302",
-        5 => "sm295&309",
-        3 => "sm302&309",
-        7 => "sm295&302&309"
-    )
+    # The columns must be in the correct order (0 to 111)
+    columns = [
+        "sm",
+        "sm309",
+        "sm302",
+        "sm302&309",
+        "sm295",
+        "sm295&309",
+        "sm295&302",
+        "sm295&302&309"
+    ]
     
-    types = Dict(s => Float64 for s in values(ix_to_meth))
-    columns = collect(values(ix_to_meth))
+    types = Dict(s => Float64 for s ∈ columns)
     g_columns = copy(columns)
     push!(g_columns, "Exp")
-    data = CSV.read("data.csv", DataFrame, delim = "\t", types = types)
+    data = CSV.read("data.csv", DataFrame, delim = "\t", types = types, comment = "#")
     data = data[:, g_columns]
     data = combine(groupby(data, :Exp), names(data[:, columns]) .=> mean, renamecols = false)
     totals = sum(Matrix(data[:,columns]), dims=2)
     data[:, columns] = data[:, columns] ./ totals
-    A_values = data[data.Exp .== "A", columns]
-    A_values = Dict(pairs(eachcol(A_values)))
-    A = [A_values[Symbol(ix_to_meth[i-1])][1] for i ∈ 1:length(A_values)]
-    A
+    # Iterate over each group and convert to dictionary
+    data_groups = Dict()
+    for exp in unique(data.Exp)
+        row = data[data.Exp .== exp, :]
+        X = [data[data.Exp .== exp, col][1] for col ∈ columns]
+        data_groups[exp] = X
+    end
 end
 
 @time begin
     k = [1.0,1.0,1.0,0.2,0.2,0.2]
     @info "Ansatz: $k"
-    function objective(variables)
+    function objective(variables, R)
         variables = variables.^2 #Must be positive
         n = length(variables)÷2
         B = zeros(2^n)
         B[1] = 1
         M = transition_matrix(variables)
         P = exp(M)*B
-        residue = sum((P - A).^2)
+        residue = sum((P - R).^2)
         return residue
     end
-    result = optimize(objective, k)
-    k_optim = result.minimizer.^2
-    @info "Found: $k_optim"
+    k_results = Dict(col => optimize(x -> objective(x, data_groups[col]), k).minimizer.^2 for col ∈ keys(data_groups))
 end
 
 @time begin
-    n = length(k_optim)÷2
-    M_optim = transition_matrix(k_optim)
-    λ, Q = eigen(M_optim) # M = QΛQ^(-1)
-    Λ = Diagonal(λ)
-    expΛ = exp(Λ)
-    iQ = inv(Q)
-    B = zeros(2^n)
-    B[1] = 1
     t = LinRange(0, 2, 100)
-    P = [Q*((expΛ)^t_i)*iQ*B for t_i in t]
-    P = mapreduce(permutedims, vcat, P)
+    function evol(k, t)
+        n = length(k)÷2
+        M_optim = transition_matrix(k)
+        λ, Q = eigen(M_optim) # M = QΛQ^(-1)
+        Λ = Diagonal(λ)
+        expΛ = exp(Λ)
+        iQ = inv(Q)
+        B = zeros(2^n)
+        B[1] = 1
+        P = [Q*((expΛ)^t_i)*iQ*B for t_i in t]
+        P = mapreduce(permutedims, vcat, P)
+        return P
+    end
+    P = Dict(col => evol(k_results[col], t) for col ∈ keys(k_results))
 end
 
 begin
-    m = size(P)[2]
-    labels = permutedims([bitstring(UInt8(i))[end-2:end] for i ∈ 0:m-1])
-    colors = collect(palette(:tab10))[1:m]
-    plot(t, P,
-        label = labels,
-        xlabel = "Time (min)",
-        ylabel = "Occupation Probability",
-        legend = :outerright,
-        size = (900, 600),
-        linewidth = 2,
-        palette = colors
-    )
-    scatter!([1], transpose(A), labels = nothing, marker = :x, palette = colors, markersize = 5, markerstrokewidth = 2)
-    savefig("transition_rate_find.png")
+    for col ∈ keys(P)
+        G = P[col]
+        m = size(G)[2]
+        labels = permutedims([bitstring(UInt8(i))[end-2:end] for i ∈ 0:m-1])
+        colors = collect(palette(:tab10))[1:m]
+        plot(t, G,
+            label = labels,
+            xlabel = "Time (min)",
+            ylabel = "Occupation Probability",
+            legend = :outerright,
+            size = (900, 600),
+            linewidth = 2,
+            palette = colors
+        )
+        scatter!([1], transpose(data_groups[col]), labels = nothing, marker = :x, palette = colors, markersize = 5, markerstrokewidth = 2)
+        savefig("transition_rate_find_$col.png")
+    end
 end
