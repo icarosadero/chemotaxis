@@ -9,6 +9,9 @@ begin
     using Plots
 end
 
+nMet = 3
+nStates = 1 << nMet
+
 begin
     """
         transition_matrix(kseq)
@@ -23,19 +26,19 @@ begin
 
     """
     function transition_matrix(kseq)
-        nMet = length(kseq)÷2
-        nStates = 1 << nMet
         T = zeros(nStates, nStates)
+        #Scan the initial states
         for s0 ∈ 0:nStates-1
-            #Union of all accesbile states. For example, for s0 = 0, ~s0 = 7 - 0 = 7 = 111
-            accessible = digits((nStates - 1) - s0, base = 2, pad = nMet)
-            @debug "s0: $s0, accessible: $accessible"
+            #Define if each site is metilable or not. For example, for s0 = 0, ~s0 = 7 - 0 = 7 = 111
+            metilable = digits((nStates - 1) - s0, base = 2, pad = nMet)
+            @debug "s0: $s0, metilable: $metilable"
             for i ∈ 1:nMet
-                site = accessible[i] << (i - 1)
+                #Bit in the state of the metilable site
+                site = metilable[i] << (i - 1)
                 if site != 0
                     s1 = s0 | site
                     @debug "s0: $s0, s1: $s1, site: $site"
-                    k = (s1 == s0 << 1 + 1) ? kseq[i] : kseq[i+nMet]
+                    k = ((s1 == s0 << 1 + 1) | (i==1)) ? kseq[i] : kseq[i+nMet-1]
                     T[s0+1, s0+1] -= k
                     T[s1+1, s0+1] += k
                 end
@@ -76,12 +79,11 @@ begin
 end
 
 @time begin
-    k = [1.0,1.0,1.0,0.2,0.2,0.2]
+    k = [1.0,1.0,1.0,0.2,0.2]
     @info "Ansatz: $k"
     function objective(variables, R)
         variables = variables.^2 #Must be positive
-        n = length(variables)÷2
-        B = zeros(2^n)
+        B = zeros(2^nMet)
         B[1] = 1
         M = transition_matrix(variables)
         P = exp(M)*B
@@ -94,13 +96,12 @@ end
 @time begin
     t = LinRange(0, 2, 100)
     function evol(k, t)
-        n = length(k)÷2
         M_optim = transition_matrix(k)
         λ, Q = eigen(M_optim) # M = QΛQ^(-1)
         Λ = Diagonal(λ)
         expΛ = exp(Λ)
         iQ = inv(Q)
-        B = zeros(2^n)
+        B = zeros(2^nMet)
         B[1] = 1
         P = [Q*((expΛ)^t_i)*iQ*B for t_i in t]
         P = mapreduce(permutedims, vcat, P)
