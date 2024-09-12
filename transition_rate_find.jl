@@ -1,8 +1,8 @@
 begin
+    using Pkg; Pkg.add("Optim"); Pkg.add("Tables"); Pkg.add("CSV"); Pkg.add("DataFrames"); Pkg.add("Statistics"); Pkg.add("Plots"); Pkg.add("LinearAlgebra")
     using CSV
     using DataFrames
     using Statistics
-    using Pkg; Pkg.add("Optim"); Pkg.add("Tables")
     using Optim
     using Tables
     using LinearAlgebra
@@ -38,7 +38,7 @@ begin
                 if site != 0
                     s1 = s0 | site
                     @debug "s0: $s0, s1: $s1, site: $site"
-                    k = ((s1 == s0 << 1 + 1) | (i==1)) ? kseq[i] : kseq[i+nMet-1]
+                    k = (site & (s0 << 1 + 1)) > 0 ? kseq[i] : kseq[i+nMet-1]
                     T[s0+1, s0+1] -= k
                     T[s1+1, s0+1] += k
                 end
@@ -79,7 +79,7 @@ begin
 end
 
 @time begin
-    k = [1.0,1.0,1.0,0.2,0.2]
+    k = [1.0,2.0,4.0,0.1,0.2]
     @info "Ansatz: $k"
     function objective(variables, R)
         variables = variables.^2 #Must be positive
