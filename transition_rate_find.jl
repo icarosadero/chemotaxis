@@ -1,5 +1,9 @@
 begin
-    using Pkg; Pkg.add("Optim"); Pkg.add("Tables"); Pkg.add("CSV"); Pkg.add("DataFrames"); Pkg.add("Statistics"); Pkg.add("Plots"); Pkg.add("LinearAlgebra")
+    using Pkg; 
+    Pkg.add(["Optim", "Tables", "CSV", "DataFrames", "Statistics", "Plots", "LinearAlgebra", "PrettyTables"])
+end
+
+begin
     using CSV
     using DataFrames
     using Statistics
@@ -7,10 +11,13 @@ begin
     using Tables
     using LinearAlgebra
     using Plots
+    using PrettyTables
 end
 
-nMet = 3
-nStates = 1 << nMet
+begin
+    nMet = 3
+    nStates = 1 << nMet
+end
 
 begin
     """
@@ -79,23 +86,34 @@ begin
 end
 
 @time begin
-    k = [1.0,2.0,4.0,0.1,0.2]
+    k = [1.0,2.0,4.0,0.1,0.2,1] #k1,k2,k3,k2',k3',α
     @info "Ansatz: $k"
-    function objective(variables, R)
+    function objective(variables, R, α = 1)
         variables = variables.^2 #Must be positive
         B = zeros(2^nMet)
         B[1] = 1
         M = transition_matrix(variables)
-        P = exp(M)*B
+        P = exp(α*α*M)*B
         residue = sum((P - R).^2)
         return residue
     end
-    k_results = Dict(col => optimize(x -> objective(x, data_groups[col]), k).minimizer.^2 for col ∈ keys(data_groups))
+    k_results = Dict{String1, Vector{Float64}}()
+    Chisq = Dict{String, Float64}() 
+    for col ∈ keys(data_groups)
+        if col != "A"
+            k_results[col] = optimize(x -> objective(x[1:end-1], data_groups[col], x[end]), k).minimizer.^2
+            Chisq[col] = objective(k_results[col], data_groups[col], k_results[col][end])
+        else
+            k_results[col] = optimize(x -> objective(x, data_groups[col]), k[1:end-1]).minimizer.^2
+            Chisq[col] = objective(k_results[col], data_groups[col])
+            push!(k_results[col], 1) #α of B is kept as reference
+        end
+    end
 end
 
 @time begin
     t = LinRange(0, 2, 100)
-    function evol(k, t)
+    function evol(k, t, α)
         M_optim = transition_matrix(k)
         λ, Q = eigen(M_optim) # M = QΛQ^(-1)
         Λ = Diagonal(λ)
@@ -103,11 +121,11 @@ end
         iQ = inv(Q)
         B = zeros(2^nMet)
         B[1] = 1
-        P = [Q*((expΛ)^t_i)*iQ*B for t_i in t]
+        P = [Q*((expΛ)^(t_i*α))*iQ*B for t_i in t]
         P = mapreduce(permutedims, vcat, P)
         return P
     end
-    P = Dict(col => evol(k_results[col], t) for col ∈ keys(k_results))
+    P = Dict(col => evol(k_results[col][1:end-1], t, k_results[col][end]) for col ∈ keys(k_results))
 end
 
 begin
@@ -123,9 +141,16 @@ begin
             legend = :outerright,
             size = (900, 600),
             linewidth = 2,
-            palette = colors
+            palette = colors,
+            title = "Χ² $(round(Chisq[col], digits = 3))"
         )
         scatter!([1], transpose(data_groups[col]), labels = nothing, marker = :x, palette = colors, markersize = 5, markerstrokewidth = 2)
         savefig("transition_rate_find_$col.png")
     end
+end
+
+begin
+    k_pretty = copy(k_results)
+    labels = ["k1", "k2", "k3", "k2'", "k3'", "α"]
+    pretty_table(k_pretty, row_labels = labels, max_num_of_rows = -1)
 end
