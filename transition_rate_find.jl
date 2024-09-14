@@ -142,7 +142,7 @@ begin
             size = (900, 600),
             linewidth = 2,
             palette = colors,
-            title = "Χ² $(round(Chisq[col], digits = 3))"
+            title = "Χ²: $(round(Chisq[col], digits = 3))"
         )
         scatter!([1], transpose(data_groups[col]), labels = nothing, marker = :x, palette = colors, markersize = 5, markerstrokewidth = 2)
         savefig("transition_rate_find_$col.png")
