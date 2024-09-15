@@ -83,37 +83,57 @@ begin
         X = [data[data.Exp .== exp, col][1] for col ∈ columns]
         data_groups[exp] = X
     end
+    ordered_column_names = sort(collect(keys(data_groups)))
 end
 
 @time begin
-    k = [1.0,2.0,4.0,0.1,0.2,1] #k1,k2,k3,k2',k3',α
+    k = [1.0,2.0,4.0,0.1,0.2,1.0,1.0] #k1, k2, k3, k2', k3', tA, tB
     @info "Ansatz: $k"
-    function objective(variables, R, α = 1)
-        variables = variables.^2 #Must be positive
+    function objective(K, R, t = 1)
         B = zeros(2^nMet)
         B[1] = 1
-        M = transition_matrix(variables)
-        P = exp(α*α*M)*B
+        M = transition_matrix(K)
+        P = exp(t*M)*B
         residue = sum((P - R).^2)
         return residue
     end
-    k_results = Dict{String1, Vector{Float64}}()
-    Chisq = Dict{String, Float64}() 
-    for col ∈ keys(data_groups)
-        if col != "A"
-            k_results[col] = optimize(x -> objective(x[1:end-1], data_groups[col], x[end]), k).minimizer.^2
-            Chisq[col] = objective(k_results[col], data_groups[col], k_results[col][end])
-        else
-            k_results[col] = optimize(x -> objective(x, data_groups[col]), k[1:end-1]).minimizer.^2
-            Chisq[col] = objective(k_results[col], data_groups[col])
-            push!(k_results[col], 1) #α of B is kept as reference
-        end
+    function ΣObjective(variables, column_order)
+        variables = variables.^2 #Force positives
+        t_shifts = variables[end-1:end]
+        push!(t_shifts, 1) #Last one is kept constant
+        K = variables[1:end-2]
+        return sum([objective(K, data_groups[col], t_shifts[i]) for (i, col) ∈ enumerate(column_order)])
     end
+    function optimize_given_permutation(column_order)
+        optim = optimize(x -> ΣObjective(x, column_order), k)
+        Chisq = ΣObjective(optim.minimizer, column_order)
+        return Chisq, optim
+    end
+
+    N = size(ordered_column_names, 1)
+    optimizations = [optimize_given_permutation(circshift(ordered_column_names, k)) for k ∈ 0:N-1]    
+    best = argmin([optim[1] for optim ∈ optimizations])
+    column_order = circshift(ordered_column_names, best)
+
+    optim = optimizations[best][2]
+    Chisq = optimizations[best][1]
+    variables_best = optim.minimizer.^2
+    t_best = optim.minimizer[end-1:end]
+    push!(t_best, 1)
+    t_best = Dict(zip(column_order, t_best))
+    k_best = variables_best[1:end-2]
+
+    #Pretty printing
+    v_pretty = copy(variables_best)
+    push!(v_pretty, 1)
+    push!(v_pretty, Chisq)
+    labels = [["k1", "k2", "k3", "k2'", "k3'"]; column_order; ["Chisq"]]
+    pretty_table(v_pretty, row_labels = labels, max_num_of_rows = -1)
 end
 
 @time begin
     t = LinRange(0, 2, 100)
-    function evol(k, t, α)
+    function evol(k, t)
         M_optim = transition_matrix(k)
         λ, Q = eigen(M_optim) # M = QΛQ^(-1)
         Λ = Diagonal(λ)
@@ -121,20 +141,19 @@ end
         iQ = inv(Q)
         B = zeros(2^nMet)
         B[1] = 1
-        P = [Q*((expΛ)^(t_i*α))*iQ*B for t_i in t]
+        P = [Q*((expΛ)^(t_i))*iQ*B for t_i in t]
         P = mapreduce(permutedims, vcat, P)
         return P
     end
-    P = Dict(col => evol(k_results[col][1:end-1], t, k_results[col][end]) for col ∈ keys(k_results))
+    P = evol(k_best, t);
 end
 
 begin
-    for col ∈ keys(P)
-        G = P[col]
-        m = size(G)[2]
+    for col ∈ ordered_column_names
+        m = size(P)[2]
         labels = permutedims([bitstring(UInt8(i))[end-2:end] for i ∈ 0:m-1])
         colors = collect(palette(:tab10))[1:m]
-        plot(t, G,
+        plot(t, P,
             label = labels,
             xlabel = "Time (min)",
             ylabel = "Occupation Probability",
@@ -142,15 +161,9 @@ begin
             size = (900, 600),
             linewidth = 2,
             palette = colors,
-            title = "Χ²: $(round(Chisq[col], digits = 3))"
+            title = "Measurements $col | Χ²: $(round(Chisq, digits = 3))"
         )
-        scatter!([1], transpose(data_groups[col]), labels = nothing, marker = :x, palette = colors, markersize = 5, markerstrokewidth = 2)
+        scatter!([t_best[col]], transpose(data_groups[col]), labels = nothing, marker = :x, palette = colors, markersize = 5, markerstrokewidth = 2)
         savefig("transition_rate_find_$col.png")
     end
-end
-
-begin
-    k_pretty = copy(k_results)
-    labels = ["k1", "k2", "k3", "k2'", "k3'", "α"]
-    pretty_table(k_pretty, row_labels = labels, max_num_of_rows = -1)
 end
