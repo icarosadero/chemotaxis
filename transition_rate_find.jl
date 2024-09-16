@@ -1,6 +1,10 @@
 begin
-    using Pkg; 
-    Pkg.add(["Optim", "Tables", "CSV", "DataFrames", "Statistics", "Plots", "LinearAlgebra", "PrettyTables"])
+    #Avoids reinstalling things over and over again
+    if !("PkgInstalled" ∈ keys(ENV))
+        using Pkg; 
+        Pkg.add(["Optim", "Tables", "CSV", "DataFrames", "Statistics", "Plots", "LinearAlgebra", "PrettyTables"])
+        ENV["PkgInstalled"] = true
+    end
 end
 
 begin
@@ -87,7 +91,7 @@ begin
 end
 
 @time begin
-    k = [1.0,2.0,4.0,0.1,0.2,1.0,1.0] #k1, k2, k3, k2', k3', tA, tB
+    k = [2.0,4.0,0.1,0.2,1.0,1.0,1.0] #k2, k3, k2', k3', tA, tB, tC (k1 is fixed to 1)
     @info "Ansatz: $k"
     function objective(K, R, t = 1)
         B = zeros(2^nMet)
@@ -99,35 +103,24 @@ end
     end
     function ΣObjective(variables, column_order)
         variables = variables.^2 #Force positives
-        t_shifts = variables[end-1:end]
-        push!(t_shifts, 1) #Last one is kept constant
+        prepend!(variables, 1) #k1 = 1
+        t_shifts = variables[end-2:end]
         K = variables[1:end-2]
         return sum([objective(K, data_groups[col], t_shifts[i]) for (i, col) ∈ enumerate(column_order)])
     end
-    function optimize_given_permutation(column_order)
-        optim = optimize(x -> ΣObjective(x, column_order), k)
-        Chisq = ΣObjective(optim.minimizer, column_order)
-        return Chisq, optim
-    end
+    optim = optimize(x -> ΣObjective(x, ordered_column_names), k)
+    Chisq = ΣObjective(optim.minimizer, ordered_column_names)
 
-    N = size(ordered_column_names, 1)
-    optimizations = [optimize_given_permutation(circshift(ordered_column_names, k)) for k ∈ 0:N-1]    
-    best = argmin([optim[1] for optim ∈ optimizations])
-    column_order = circshift(ordered_column_names, best)
-
-    optim = optimizations[best][2]
-    Chisq = optimizations[best][1]
     variables_best = optim.minimizer.^2
-    t_best = optim.minimizer[end-1:end]
-    push!(t_best, 1)
-    t_best = Dict(zip(column_order, t_best))
+    prepend!(variables_best, 1) #k1 = 1
+    t_best = optim.minimizer[end-2:end]
+    t_best = Dict(zip(ordered_column_names, t_best))
     k_best = variables_best[1:end-2]
 
     #Pretty printing
-    v_pretty = copy(variables_best)
-    push!(v_pretty, 1)
+    v_pretty = deepcopy(variables_best)
     push!(v_pretty, Chisq)
-    labels = [["k1", "k2", "k3", "k2'", "k3'"]; column_order; ["Chisq"]]
+    labels = [["k1", "k2", "k3", "k2'", "k3'"]; ordered_column_names; ["Chisq"]]
     pretty_table(v_pretty, row_labels = labels, max_num_of_rows = -1)
 end
 
@@ -149,6 +142,7 @@ end
 end
 
 begin
+    local labels
     for col ∈ ordered_column_names
         m = size(P)[2]
         labels = permutedims([bitstring(UInt8(i))[end-2:end] for i ∈ 0:m-1])
